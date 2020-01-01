@@ -1,4 +1,4 @@
-##Lite thread-safe dynamically polymorphic pool-based function wrappers.
+## Lite thread-safe dynamically polymorphic pool-based function wrappers.
 
 * Thread-safety is based on copying instances of functions to the thread local pool.
 * It is done so, because any real attempts to keep thread-safety with shared data lead to big overhead even in case of the only thread and easy copyable functions (that is the most popular case).
