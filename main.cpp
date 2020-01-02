@@ -33,6 +33,15 @@ class FunctionHolder {
   template<class T>
   explicit FunctionHolder(T functor) : counter(getPool<F>().construct(std::move(functor))) {}
 
+  FunctionHolder &operator=(const FunctionHolder &other) {
+    if (this != &other) {
+      auto copy = FunctionHolder(other);
+      std::swap(owner, copy.owner);
+      std::swap(counter, copy.counter);
+    }
+    return *this;
+  }
+
   template<class... Args>
   auto operator()(Args &&... args) { return counter->data(std::forward<Args>(args)...); }
 
@@ -72,7 +81,8 @@ struct SmartFunction<Res(Args...)> {
   const VTable<Res, Args...> *curVTable;
 
   template<class F>
-  explicit SmartFunction(const FunctionHolder<F> &holder) : curVTable(&vTable<FunctionHolder<F>, Res, Args...>) {
+  explicit SmartFunction(const FunctionHolder<F> &holder) noexcept
+      : curVTable(&vTable<FunctionHolder<F>, Res, Args...>) {
     new(&data) FunctionHolder<F>(holder);
   }
 
@@ -85,6 +95,15 @@ struct SmartFunction<Res(Args...)> {
 
   ~SmartFunction() { curVTable->destruct(&data); }
 
+  SmartFunction &operator=(const SmartFunction &other) {
+    if (this != &other) {
+      auto copy = SmartFunction(other);
+      std::swap(data, copy.data);
+      std::swap(curVTable, copy.curVTable);
+    }
+    return *this;
+  }
+
   Res operator()(Args &&... args) { return curVTable->invoke(&data, std::forward<Args>(args)...); };
 };
 
@@ -94,4 +113,16 @@ int main() {
   SmartFunction<int(int)> f([](int n) { return n * 2; });
   std::cout << f(3) << std::endl << SmartFunction<int(int)>(f)(2) << std::endl;
   std::thread([&f] { std::cout << SmartFunction<int(int)>(f)(5) << std::endl; }).join();
+  f = f;
+  std::cout << f(6) << std::endl;
+  f = SmartFunction<int(int)>([](int n) { return n * 4; });
+  std::cout << f(6) << std::endl;
+  //---
+  auto constantly = [](auto x) { return [x](auto...) { return x; }; };
+  FunctionHolder h(constantly(2));
+  std::cout << h() << std::endl;
+  h = h;
+  std::cout << h(542, 'k') << std::endl;
+  h = FunctionHolder(constantly(3));
+  std::cout << h("jjjjjjj") << std::endl;
 }
