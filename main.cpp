@@ -1,5 +1,3 @@
-#include <atomic>
-#include <iostream>
 #include <thread>
 
 #include <boost/pool/object_pool.hpp>
@@ -90,8 +88,10 @@ struct SmartFunction<Res(Args...)> {
   Res operator()(Args &&... args) { return curVTable->invoke(&data, std::forward<Args>(args)...); };
 };
 
+#include <iostream>
+
 int main() {
   SmartFunction<int(int)> f([](int n) { return n * 2; });
   std::cout << f(3) << std::endl << SmartFunction<int(int)>(f)(2) << std::endl;
-  std/*or boost*/::thread([&f] { std::cout << SmartFunction<int(int)>(f)(5) << std::endl; }).join();
+  std::thread([&f] { std::cout << SmartFunction<int(int)>(f)(5) << std::endl; }).join();
 }
