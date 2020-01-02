@@ -3,8 +3,6 @@
 #include <thread>
 
 #include <boost/pool/object_pool.hpp>
-#include <boost/thread/thread.hpp>
-#include <boost/thread/tss.hpp>
 
 template<class T>
 struct Counter {
@@ -17,14 +15,9 @@ template<class F>
 using FunctionalPool = boost::object_pool<Counter<F>>;
 
 template<class F>
-boost::thread_specific_ptr<FunctionalPool<F>> pool{};
-
-template<class F>
-static FunctionalPool<F> *getPool() {
-  if (!pool<F>.get()) {
-    pool<F>.reset(new FunctionalPool<F>());
-  }
-  return pool<F>.get();
+FunctionalPool<F> &getPool() {
+  thread_local FunctionalPool<F> pool;
+  return pool;
 }
 
 template<class F>
@@ -37,18 +30,18 @@ class FunctionHolder {
 
   FunctionHolder(const FunctionHolder<F> &other)
       : counter(owner == other.owner ? (++other.counter->uses, other.counter)
-                                     : (getPool<F>()->construct(other.counter->data))) {}
+                                     : (getPool<F>().construct(other.counter->data))) {}
 
   template<class T>
-  explicit FunctionHolder(T functor) : counter(getPool<F>()->construct(std::move(functor))) {}
+  explicit FunctionHolder(T functor) : counter(getPool<F>().construct(std::move(functor))) {}
 
   template<class... Args>
   auto operator()(Args &&... args) { return counter->data(std::forward<Args>(args)...); }
 
   ~FunctionHolder() {
     if (!--counter->uses) {
-      assert(getPool<F>()->is_from(counter));
-      getPool<F>()->destroy(counter);
+      assert(getPool<F>().is_from(counter));
+      getPool<F>().destroy(counter);
     }
   }
 };
@@ -64,7 +57,7 @@ struct VTable {
 };
 
 template<class F, class Res, class... Args>
-constexpr thread_local VTable<Res, Args...> vTable = {
+constexpr VTable<Res, Args...> vTable = {
     [](const void *from, void *to) { new(to) F(*static_cast<F const *>(from)); },
     [](void *f) { static_cast<F *>(f)->~F(); },
     [](void *f, Args... args) -> Res { return (*static_cast<F *>(f))(std::move(args)...); }
