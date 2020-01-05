@@ -1,3 +1,10 @@
+//
+// Created by zhele on 23.11.2019.
+//
+
+#ifndef FUNCTIONAL_SMART_FUNCTION_H
+#define FUNCTIONAL_SMART_FUNCTION_H
+
 #include <thread>
 
 #include <boost/pool/object_pool.hpp>
@@ -14,7 +21,7 @@ using FunctionalPool = boost::object_pool<Counter<F>>;
 
 template<class F>
 FunctionalPool<F> &getPool() {
-  thread_local FunctionalPool<F> pool;
+  thread_local FunctionalPool<F> pool(12);
   return pool;
 }
 
@@ -43,7 +50,7 @@ class FunctionHolder {
   }
 
   template<class... Args>
-  auto operator()(Args &&... args) { return counter->data(std::forward<Args>(args)...); }
+  auto operator()(Args... args) const { return counter->data(std::forward<Args>(args)...); }
 
   ~FunctionHolder() {
     if (!--counter->uses) {
@@ -60,14 +67,14 @@ template<class Res, class... Args>
 struct VTable {
   void (*copy)(const void *from, void *to);
   void (*destruct)(void *f);
-  Res (*invoke)(void *f, Args...);
+  Res (*invoke)(const void *f, Args...);
 };
 
 template<class F, class Res, class... Args>
 constexpr VTable<Res, Args...> vTable = {
     [](const void *from, void *to) { new(to) F(*static_cast<F const *>(from)); },
     [](void *f) { static_cast<F *>(f)->~F(); },
-    [](void *f, Args... args) -> Res { return (*static_cast<F *>(f))(std::move(args)...); }
+    [](const void *f, Args... args) -> Res { return (*static_cast<F const *>(f))(std::forward<Args>(args)...); }
 };
 
 template<class T>
@@ -80,6 +87,10 @@ struct SmartFunction<Res(Args...)> {
   std::aligned_storage_t<sizeof(FunctionHolderExample), alignof(FunctionHolderExample)> data{};
   const VTable<Res, Args...> *curVTable;
 
+  constexpr SmartFunction() : curVTable(nullptr) {}
+  constexpr SmartFunction(std::nullptr_t) // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+      : SmartFunction() {}
+
   template<class F>
   explicit SmartFunction(const FunctionHolder<F> &holder) noexcept
       : curVTable(&vTable<FunctionHolder<F>, Res, Args...>) {
@@ -87,13 +98,20 @@ struct SmartFunction<Res(Args...)> {
   }
 
   template<class F>
-  explicit SmartFunction(F functor) : SmartFunction<Res(Args...)>(FunctionHolder(std::move(functor))) {}
+  /*implicit*/ SmartFunction(F functor) // NOLINT(google-explicit-constructor,hicpp-explicit-conversions)
+      : SmartFunction<Res(Args...)>(FunctionHolder(std::move(functor))) {}
 
   SmartFunction(const SmartFunction &other) : curVTable(other.curVTable) {
-    curVTable->copy(&other.data, &data);
+    if (curVTable) {
+      curVTable->copy(&other.data, &data);
+    }
   }
 
-  ~SmartFunction() { curVTable->destruct(&data); }
+  ~SmartFunction() {
+    if (curVTable) {
+      curVTable->destruct(&data);
+    }
+  }
 
   SmartFunction &operator=(const SmartFunction &other) {
     if (this != &other) {
@@ -104,8 +122,20 @@ struct SmartFunction<Res(Args...)> {
     return *this;
   }
 
-  Res operator()(Args &&... args) { return curVTable->invoke(&data, std::forward<Args>(args)...); };
+  Res operator()(Args... args) const {
+    if (curVTable) {
+      return curVTable->invoke(&data, std::forward<Args>(args)...);
+    } else {
+      throw std::bad_function_call();
+    }
+  };
+
+  explicit operator bool() const {
+    return static_cast<bool>(curVTable);
+  }
 };
+
+#endif //FUNCTIONAL_SMART_FUNCTION_H
 
 #include <iostream>
 
